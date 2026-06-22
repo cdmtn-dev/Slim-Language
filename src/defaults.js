@@ -1,0 +1,421 @@
+import { 
+    StructPassedError,
+    StructError,
+    StructExpectError,
+    StructResultError,
+    ArgumentDeclarationTypeError,
+    EnumError
+} from "./classErrors.js"
+import { formatError } from "./classErrors.js"
+
+export function __handle_async_error__(err) {
+    if (err?.tag) {
+        process.stderr.write(formatError(
+            err.tag,
+            err.message,
+            err.file       ?? null,
+            err.line       ?? null,
+            err.col        ?? null,
+            err.sourceLine ?? null,
+        ) + "\n")
+    } else {
+        process.stderr.write(`\nError: ${err?.message ?? String(err)}\n\n`)
+    }
+    process.exit(1)
+}
+export function __handle_sync_error__(err) {
+    if (err?.tag) {
+        process.stderr.write(formatError(
+            err.tag,
+            err.message,
+            err.file       ?? null,
+            err.line       ?? null,
+            err.col        ?? null,
+            err.sourceLine ?? null,
+        ) + "\n")
+    } else {
+        process.stderr.write(`\nError: ${err?.message ?? String(err)}\n\n`)
+    }
+    process.exit(1)
+}
+
+// Console aliases
+export const log = console.log.bind(console)
+export const warn = console.warn.bind(console)
+export const error = console.error.bind(console)
+export const info = console.info.bind(console)
+export const debug = console.debug.bind(console)
+
+export const PI = Math.PI
+
+export class Component {}
+export class Type {
+    static isStruct(obj) {
+        return type(obj) == "struct"
+    }
+    static isEnum(obj) {
+        return type(obj) == "enum"
+    }
+}
+export class Struct {}
+export class Enum {}
+export class Debug {
+    static log(...args) {
+        console.log(`[SLIM]`, ...args)
+    }
+}
+
+export function type(obj) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)/
+
+    const isArray = (obj) => {
+        return typeof obj === "object" && Array.isArray(obj)
+    }
+    const isTypedArray = (arr, t) => {
+        return arr.every(element => type(element) === t)
+    }
+    const isTypedOfArray = (arr, t) => {
+        return arr.every(element => typeof element === t)
+    }
+    
+    if(obj == null) return "null"
+    if(obj == undefined) return "undefined"
+    if(obj == NaN) return "NaN"
+
+    if(typeof obj == "string" && urlRegex.test(obj)) {
+        const url = new URL(obj)
+
+        if(url.protocol == "https:") {
+            return "httpsURL"
+        }
+        else {
+            return "httpURL"
+        }
+    }
+
+    if(typeof obj == "object" && !Array.isArray(obj) && "type" in obj && obj.type == Struct) {
+        return "struct"
+    }
+    if(typeof obj == "object" && !Array.isArray(obj) && "type" in obj && obj.type == Enum) {
+        return "enum"
+    }
+
+    if(typeof obj === "function" && obj.prototype instanceof Component) return "component"
+
+    if(typeof obj == "string" && emailRegex.test(obj)) return "email"
+    
+    if(isArray(obj) && isTypedArray(obj, "undefined")) return "null[]"
+    if(isArray(obj) && isTypedArray(obj, "string")) return "string[]"
+    if(isArray(obj) && isTypedArray(obj, "int")) return "int[]"
+    if(isArray(obj) && isTypedArray(obj, "float")) return "float[]"
+    if(isArray(obj) && isTypedArray(obj, "object")) return "object[]"
+    if(isArray(obj) && isTypedOfArray(obj, "number")) return "number[]"
+
+    if(isArray(obj)) return "array"
+    if(typeof obj === "object" && !Array.isArray(obj)) return "object"
+
+    if(typeof obj === "string") return "string"
+    if(typeof obj === "number" && Number.isInteger(obj)) return "int"
+    if(typeof obj === "number" && !Number.isInteger(obj)) return "float"
+
+    if(typeof obj === "boolean") return "bool"
+
+    if(typeof obj == "function") return "function"
+
+    return undefined
+}
+
+// structures
+
+const __structs__ = {}
+const __enums__ = {}
+const __RESERVED_DEFINES__ = new Set([
+    "Error", "Object", "Array", "String", "Number",
+    "Boolean", "Function", "Symbol", "Map", "Set",
+    "Promise", "Proxy", "Reflect", "Math", "JSON",
+    "Date", "RegExp", "WeakMap", "WeakSet", "WeakRef",
+    "ArrayBuffer", "DataView", "Iterator",
+    "Int8Array", "Uint8Array", "Uint8ClampedArray",
+    "Int16Array", "Uint16Array", "Int32Array",
+    "Uint32Array", "Float32Array", "Float64Array",
+    "undefined", "null", "NaN", "Infinity",
+    "globalThis", "global", "process", "console",
+    "setTimeout", "setInterval", "clearTimeout", "clearInterval",
+    "queueMicrotask", "structuredClone",
+    "eval", "isNaN", "isFinite", "parseFloat", "parseInt",
+    "decodeURI", "decodeURIComponent", "encodeURI", "encodeURIComponent",
+    "type", "schemeArray", "verify", "values", "verifySafe"
+])
+
+export function __def_struct__(name, schema) {
+    const schemeArray = {}
+
+    Object.keys(schema).forEach(item => {
+        let fieldName = item
+        let isOptional = false
+        let value = schema[item]
+
+        if(fieldName.startsWith("*")) {
+            isOptional = true
+            fieldName = fieldName.slice(1).trim()
+        }
+
+        schemeArray[fieldName] = {
+            type: value,
+            optional: isOptional
+        }
+    })
+
+    __structs__[name] = {
+        type: Struct,
+        name: name,
+        scheme: schemeArray,
+        verify: (object) => {
+            __typed__(object, name)
+        },
+        verifySafe: (object) => {
+            return __typed__(object, name, "errorResult")
+        }
+    }
+
+    if (!__RESERVED_DEFINES__.has(name)) {
+        globalThis[name] = __structs__[name]
+    }
+    else {
+        throw new StructError(`Name "${name}" is reserved`)
+    }
+}
+export function __def_enum__(name, schema) {
+    const schemeArray = []
+
+    Object.keys(schema).forEach(item => {
+        let fieldName = item
+
+        schemeArray[fieldName] = schema[item]
+    })
+
+    __enums__[name] = {
+        type: Enum,
+        name: name,
+        scheme: () => {
+            return schemeArray
+        },
+        values: () => {
+            return Object.values(schemeArray)
+        },
+        keys: () => {
+            return Object.keys(schemeArray)
+        },
+        has: (val) => {
+            let result = false
+
+            Object.keys(schemeArray).forEach(e => {
+                result = val == schemeArray[e]
+            })
+
+            return result
+        }
+    }
+
+    Object.keys(schemeArray).forEach(e => {
+        __enums__[name][e] = schemeArray[e]
+    })
+
+    if (!__RESERVED_DEFINES__.has(name)) {
+        globalThis[name] = __enums__[name]
+    }
+    else {
+        throw new EnumError(`Name "${name}" is reserved`)
+    }
+}
+
+export function __typed__(value, structName, returnMethod = "default") {
+    function structOk() {
+        return {
+            success: true,
+            result: value
+        }
+    }
+    function structErr(value) {
+        return {
+            success: false,
+            result: {
+                type: value.tag,
+                msg: String(value)
+            }
+        }
+    }
+    function checkType(expectedType, val) {
+        function isEnum(t = expectedType, v = val) {
+            return t in __enums__ && v.name == t
+        }
+        function isStruct(t = expectedType, v = val) {
+            return t in __structs__ && v.name == t
+        }
+
+        if(expectedType.includes("::")) {
+            const type = expectedType.split("::")[0].trim()
+            const typeValue = expectedType.split("::")[1].trim()
+
+            if(type in __enums__ && typeValue in __enums__[type]) {
+                return __enums__[type][typeValue] == val
+            }
+        }
+
+        if(isEnum()) {
+            return true
+        }
+        if(isStruct()) {
+            return true
+        }
+
+        return expectedType == "any" || type(val) == expectedType
+    }
+
+    const structDef = __structs__[structName]
+    if (!structDef) throw new StructError(`Unknown struct "${structName}"`)
+
+    const schema = structDef.scheme
+
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        let err = new StructError(`Expected object for "${structName}"`)
+
+        if(returnMethod == "errorResult") {
+            return structErr(err)
+        }
+        else {
+            throw err
+        }
+    }
+
+    const valueKeys = Object.keys(value)
+    const schemaKeys = Object.keys(schema)
+
+    const extraKeys = valueKeys.filter(k => !(k in schema))
+
+    if (extraKeys.length > 0) {
+        let err = new StructPassedError(
+            `"${structName}" does not contain any keys named "${extraKeys.join(", ")}", but it receives them`
+        )
+
+        if(returnMethod == "errorResult") {
+            return structErr(err)
+        }
+        else {
+            throw err
+        }
+    }
+
+    for (const field of schemaKeys) {
+        const def = schema[field]
+
+        if (!(field in value)) {
+            if (!def.optional) {
+                let err = new StructExpectError(
+                    `"${structName}" is receiving fewer keys than expected. The key "${field}" have not been received`
+                )
+
+                if(returnMethod == "errorResult") {
+                    return structErr(err)
+                }
+                else {
+                    throw err
+                }
+            }
+            continue
+        }
+
+        const val = value[field]
+        const expectedType = def.type
+
+        const isMultipleTypes = expectedType.includes("|")
+
+        if(isMultipleTypes) {
+            const types = expectedType.split("|").map(item => item.trim())
+            let multipleTypesVerifyResult = false
+
+            types.forEach(t => {
+                if(checkType(t, val)) multipleTypesVerifyResult = true
+            })
+
+            if (!multipleTypesVerifyResult) {
+                throwError({ field: field, expectedType: `${types.join(" or ")}`, val: val })
+            }
+        }
+        else if (!checkType(expectedType, val)) {
+            throwError({ field: field, expectedType: expectedType, val: val })
+        }
+
+        function throwError({ field, expectedType, val }) {
+            let value = type(val)
+            let expected = expectedType
+
+            if(Type.isEnum(val)) {
+                value = `${val.name} ${type(val)}`
+            }
+            if(Type.isStruct(val)) {
+                value = `${val.name} ${type(val)}`
+            }
+
+            if(expected in __enums__) {
+                expected = `${expected} enum`
+            }
+            if(expected in __structs__) {
+                expected = `${expected} struct`
+            }
+
+            let err = new StructError(
+                `"${structName}.${field}" expected ${expected}, got ${value}`
+            )
+
+            if(returnMethod == "errorResult") {
+                return structErr(err)
+            }
+            else {
+                throw err
+            }
+        }
+    }
+
+    if(returnMethod == "default") return value
+    if(returnMethod == "errorResult") return structOk()
+}
+//
+
+export function __sizeof__(value) {
+    if (value === null || value === undefined) return 0
+    if (typeof value === "string")  return value.length
+    if (Array.isArray(value))       return value.length
+    if (typeof value === "object")  return Object.keys(value).length
+    if (typeof value === "number")  return value.toString().length
+    if (typeof value === "boolean") return 1
+    return 0
+}
+
+export function __is_empty__(obj) {
+    if(__sizeof__(obj) == 0) {
+        return true
+    }
+    else {
+        return false
+    }
+}
+export function __lock_object__(obj) {
+    Object.freeze(obj)
+}
+
+Object.assign(globalThis, {
+    log, warn, error, info, debug,
+
+    type,
+
+    Component, Type, Struct,
+
+    __def_struct__, __def_enum__, __typed__, __handle_async_error__, 
+    __handle_sync_error__, __sizeof__, __is_empty__, __lock_object__,
+
+    StructError, StructPassedError, StructExpectError, ArgumentDeclarationTypeError,
+
+    PI
+})

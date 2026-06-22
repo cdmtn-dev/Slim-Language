@@ -1,0 +1,63 @@
+export class UnixTime {
+    static private convertMsToUnix(ms) {
+        if(sizeof ms > 12) return Math.floor(ms / 1000)
+        return ms
+    }
+    static toUnix(time) {
+        return this.#convertMsToUnix(time)
+    }
+    static toDate(time, {
+        format = "{{dd}}.{{MM}}.{{yyyy}} {{hh}}:{{mm}}:{{ss}}:{{ii}}",
+        ampm = false
+    } = {}) {
+        const unix = this.#convertMsToUnix(time)
+        const date = new Date(unix * 1000)
+
+        const pad = (value, len = 2) => String(value).padStart(len, "0")
+
+        let hours = date.getHours()
+        let ampmSuffix = ""
+
+        if (ampm) {
+            ampmSuffix = hours >= 12 ? "PM" : "AM"
+            hours %= 12
+
+            if (hours === 0) {
+                hours = 12
+            }
+        }
+
+        const map = {
+            "{{d}}": date.getDate(),
+            "{{dd}}": pad(date.getDate()),
+
+            "{{M}}": date.getMonth() + 1,
+            "{{MM}}": pad(date.getMonth() + 1),
+
+            "{{yy}}": String(date.getFullYear()).slice(-2),
+            "{{yyyy}}": date.getFullYear(),
+
+            "{{h}}": hours,
+            "{{hh}}": pad(hours),
+
+            "{{m}}": date.getMinutes(),
+            "{{mm}}": pad(date.getMinutes()),
+
+            "{{s}}": date.getSeconds(),
+            "{{ss}}": pad(date.getSeconds()),
+
+            "{{i}}": date.getMilliseconds(),
+            "{{ii}}": pad(date.getMilliseconds(), 3),
+
+            "{{ampm}}": ampmSuffix
+        }
+
+        let result = format
+
+        for (const [token, value] of Object.entries(map)) {
+            result = result.replaceAll(token, value)
+        }
+
+        return result
+    }
+}

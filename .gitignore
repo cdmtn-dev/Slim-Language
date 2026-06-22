@@ -1,0 +1,5 @@
+slimconfig.json
+struct.slim
+input.slim
+dist/
+node_modules
