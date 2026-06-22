@@ -1,6 +1,6 @@
 <div align="center">
   <img width="100" height="100" alt="slimlang" src="https://github.com/user-attachments/assets/301d9a23-edff-41f2-bd2a-77e2aadd66ac" />
-  <h1>Slim (Alpha)</h1>
+  <h1>Slim</h1>
 
   <p align="left">Slim is an extension of the JavaScript language that compiles into it. 
     The language adds additional features and standards that were not considered during 
@@ -8,6 +8,9 @@
     new functions and operators. The language aims to simplify the development of JavaScript
     applications by introducing new data structures.</p>
 </div>
+
+> [!IMPORTANT]
+> This is a new project in the early stages of development. You can report bugs in the Issues section and suggest new features by submitting a pull request. Thank you! I appreciate everyone who contributes to the           project's development
 
 ## Where Can Slim Be Useful?
 
