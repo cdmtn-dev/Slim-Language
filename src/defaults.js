@@ -40,11 +40,34 @@ export function __handle_sync_error__(err) {
 }
 
 // Console aliases
-export const log = console.log.bind(console)
-export const warn = console.warn.bind(console)
-export const error = console.error.bind(console)
-export const info = console.info.bind(console)
-export const debug = console.debug.bind(console)
+function logProcessed(args) {
+    return args.map(arg => {
+        if (arg && typeof arg === "object" && arg.type === Enum && "value" in arg) {
+            return arg.value
+        }
+        return arg
+    })
+}
+export const log = (...args) => {
+    const processed = logProcessed(args)
+    console.log(...processed)
+}
+export const warn = (...args) => {
+    const processed = logProcessed(args)
+    console.warn(...processed)
+}
+export const error = (...args) => {
+    const processed = logProcessed(args)
+    console.error(...processed)
+}
+export const info = (...args) => {
+    const processed = logProcessed(args)
+    console.info(...processed)
+}
+export const debug = (...args) => {
+    const processed = logProcessed(args)
+    console.debug(...processed)
+}
 
 export const PI = Math.PI
 
@@ -219,7 +242,10 @@ export function __def_enum__(name, schema) {
     }
 
     Object.keys(schemeArray).forEach(e => {
-        __enums__[name][e] = schemeArray[e]
+        __enums__[name][e] = {
+            type: Enum,
+            value: schemeArray[e]
+        }
     })
 
     if (!__RESERVED_DEFINES__.has(name)) {
