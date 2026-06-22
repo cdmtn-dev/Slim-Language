@@ -81,7 +81,11 @@ export class Type {
     }
 }
 export class Struct {}
-export class Enum {}
+export class Enum {
+    constructor(name) {
+        this.name = name;
+    }
+}
 export class Debug {
     static log(...args) {
         console.log(`[SLIM]`, ...args)
@@ -215,11 +219,18 @@ export function __def_enum__(name, schema) {
     Object.keys(schema).forEach(item => {
         let fieldName = item
 
-        schemeArray[fieldName] = schema[item]
+        if (schema[item] === undefined) {
+            schemeArray[fieldName] = {
+                type: new Enum(name),
+                name: item
+            }
+        } else {
+            schemeArray[fieldName] = schema[item]
+        }
     })
 
     __enums__[name] = {
-        type: Enum,
+        type: new Enum(name),
         name: name,
         scheme: () => {
             return schemeArray
@@ -274,7 +285,7 @@ export function __typed__(value, structName, returnMethod = "default") {
     }
     function checkType(expectedType, val) {
         function isEnum(t = expectedType, v = val) {
-            return t in __enums__ && v.name == t
+            return t in __enums__ && v in __enums__[t].values()
         }
         function isStruct(t = expectedType, v = val) {
             return t in __structs__ && v.name == t

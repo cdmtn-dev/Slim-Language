@@ -134,8 +134,11 @@ export function preprocess(code, sourceFile = "input.ps") {
                 .filter(Boolean)
                 .map(line => {
                     const idx = line.indexOf(":")
-                    if (idx === -1) return null
 
+                    if (idx === -1) {
+                        const field = line.trim()
+                        return `"${field}": undefined`
+                    }
                     const field = line.slice(0, idx).trim()
                     const type = line.slice(idx + 1).trim()
 
