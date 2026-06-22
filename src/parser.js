@@ -1,7 +1,43 @@
 import MagicString from "magic-string"
 
+function stripComments(code) {
+    let result = ""
+    let i = 0
+
+    while (i < code.length) {
+        if (code[i] === '"' || code[i] === "'" || code[i] === "`") {
+            const quote = code[i]
+            result += code[i++]
+            while (i < code.length) {
+                if (code[i] === "\\" ) { result += code[i++] + code[i++]; continue }
+                if (code[i] === quote) { result += code[i++]; break }
+                result += code[i++]
+            }
+            continue
+        }
+
+        if (code[i] === "/" && code[i + 1] === "/") {
+            while (i < code.length && code[i] !== "\n") i++
+            continue
+        }
+
+        if (code[i] === "/" && code[i + 1] === "*") {
+            i += 2
+            while (i < code.length) {
+                if (code[i] === "*" && code[i + 1] === "/") { i += 2; break }
+                i++
+            }
+            continue
+        }
+
+        result += code[i++]
+    }
+
+    return result
+}
+
 export function preprocess(code, sourceFile = "input.ps") {
-    let preprocessed = code
+    let preprocessed = stripComments(code)
     preprocessed = replaceOperator(preprocessed, "sizeof", "__sizeof__")
     preprocessed = replaceOperator(preprocessed, "kindof", "type")
     preprocessed = replaceOperator(preprocessed, "empty", "__is_empty__")
