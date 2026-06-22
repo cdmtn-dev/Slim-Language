@@ -9,6 +9,9 @@
     applications by introducing new data structures.</p>
 </div>
 
+> [!IMPORTANT]
+> This is a new project in the early stages of development. You can report bugs in the Issues section and suggest new features by submitting a pull request. Thank you! I appreciate everyone who contributes to the           project's development
+
 ## Where Can Slim Be Useful?
 
 Anywhere JavaScript and APIs are used. It can support both simple and complex architectural solutions. The language has built-in data validation structures, a wide range of operators, and solutions that have long been a pain point for JavaScript programmers.
