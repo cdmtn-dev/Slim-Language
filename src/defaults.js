@@ -42,8 +42,13 @@ export function __handle_sync_error__(err) {
 // Console aliases
 function logProcessed(args) {
     return args.map(arg => {
-        if (arg && typeof arg === "object" && arg.type === Enum && "value" in arg) {
-            return arg.value
+        if (arg && typeof arg === "object" && arg.type === Enum) {
+            if(typeof arg.value === "object") {
+                return arg.value.name
+            }
+            if("value" in arg) {
+                return arg.value
+            }
         }
         return arg
     })
