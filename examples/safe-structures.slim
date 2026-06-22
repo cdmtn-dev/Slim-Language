@@ -1,0 +1,14 @@
+struct User {
+    name: string
+    id: int
+    roles: string[]
+}
+
+const user = {
+    name: "John",
+    id: 3,
+    roles: ["Member"]
+}
+
+const structVerifyRes = User.verifySafe(user)
+log(structVerifyRes) // { success: true, result: { name: 'John', id: 3, roles: [ 'Member' ] } }

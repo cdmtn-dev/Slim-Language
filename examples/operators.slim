@@ -1,0 +1,26 @@
+// sizeof 
+
+log(sizeof [1, 2, 3]) // 3
+log(sizeof { key: "value" }) // 1
+
+// empty
+
+log(empty []) // true
+log(empty {}) // true
+log(empty null) // true
+log(empty [1, 2, 3]) // false
+
+// kindof
+
+log(kindof []) // null[]
+log(kindof [1, 2, 3]) // int[]
+log(kindof null) // null
+log(kindof [1, "hello"]) // array
+log(kindof 1.5) // float
+
+// lock
+
+const a = { name: "John" }
+lock a;
+
+a.name = "Arthur"
