@@ -290,7 +290,7 @@ export function __typed__(value, structName, returnMethod = "default") {
     }
     function checkType(expectedType, val) {
         function isEnum(t = expectedType, v = val) {
-            return t in __enums__ && v in __enums__[t].values()
+            return t in __enums__ && (v in __enums__[t].values() || __enums__[t].values().some(value1 => value1.name === v.value.name))
         }
         function isStruct(t = expectedType, v = val) {
             return t in __structs__ && v.name == t
