@@ -13,6 +13,30 @@
 
 Anywhere JavaScript and APIs are used. It can support both simple and complex architectural solutions. The language has built-in data validation structures, a wide range of operators, and solutions that have long been a pain point for JavaScript programmers.
 
+## How To Install?
+
+Requirements:
+- Node.js 14+
+- Git
+
+Installation
+```
+git clone https://github.com/cdmtn-dev/Slim-Language.git
+npm run slim
+```
+
+During installation, you’ll need to create a folder to hold your Slim project. Once you’ve created it, create two files:
+
+- slimconfig.json
+- index.slim
+
+slimconfig.json
+```json
+{
+    "main": "index"
+}
+```
+
 ## Examples
 
 All checks in Slim are runtime checks (that is, unlike TypeScript's type checks). They actually exist in the code.
