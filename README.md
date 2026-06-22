@@ -1,6 +1,6 @@
 <div align="center">
   <img width="100" height="100" alt="slimlang" src="https://github.com/user-attachments/assets/301d9a23-edff-41f2-bd2a-77e2aadd66ac" />
-  <h1>Slim</h1>
+  <h1>Slim (Alpha)</h1>
 
   <p align="left">Slim is an extension of the JavaScript language that compiles into it. 
     The language adds additional features and standards that were not considered during 
