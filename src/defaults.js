@@ -70,8 +70,7 @@ export const info = (...args) => {
     console.info(...processed)
 }
 export const debug = (...args) => {
-    const processed = logProcessed(args)
-    console.debug(...processed)
+    console.log(...args)
 }
 
 export const PI = Math.PI
