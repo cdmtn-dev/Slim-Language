@@ -86,9 +86,9 @@ function compileFile(slimFile, isEntry = false, mainEntry = null) {
     const { code: output } = transform(code, abs)
 
     if (isEntry) {
-        fs.mkdirSync("dist", { recursive: true })
-        const outputFileName = mainEntry ? `${mainEntry}.js` : `${file}.js`
-        fs.writeFileSync(`dist/${outputFileName}`, output)
+        const outputPath = path.resolve(`dist/${mainEntry}.js`)
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true })
+        fs.writeFileSync(outputPath, output)
     } else {
         const distPath = getDistPath(abs)
         fs.mkdirSync(path.dirname(distPath), { recursive: true })
@@ -144,6 +144,7 @@ async function main() {
         }
     } catch (error) {
         console.error('Error reading or parsing slimconfig.json:', error);
+        process.exit(1)
     }
 }
 main()

@@ -16,9 +16,6 @@ function resolvePath(raw, fromFile) {
     const absFrom = path.resolve(fromFile)
 
     function getDistFile(slimAbs) {
-        if (slimAbs === path.resolve("struct.slim")) {
-            return path.resolve("dist/output.js")
-        }
         if (slimAbs.startsWith(srcRoot)) {
             const rel = path.relative(srcRoot, slimAbs)
             return path.resolve("dist", rel.replace(/\.slim$/, ".js"))
@@ -55,9 +52,7 @@ function getDefaultsPath(sourceFile) {
     const abs = path.resolve(sourceFile)
 
     let distFile
-    if (abs === path.resolve("struct.slim")) {
-        distFile = path.resolve("dist/struct.js")
-    } else if (abs.startsWith(srcRoot)) {
+    if (abs.startsWith(srcRoot)) {
         const rel = path.relative(srcRoot, abs)
         distFile = path.resolve("dist", rel.replace(/\.slim$/, ".js"))
     } else {
