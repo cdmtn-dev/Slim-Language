@@ -158,7 +158,13 @@ export function preprocess(code, sourceFile = "input.ps") {
             if (type === "Result" && genericType) {
                 return `${keyword} ${name} = __typed__(${expr.trim()}, "${genericType}", "errorResult")`
             }
-            return `${keyword} ${name} = __typed__(${expr.trim()}, "${type}")`
+            return `${keyword} ${name} = __typed__(${expr.trim()}, "${type}", "${name}")`
+        }
+    )
+    collect(
+        /\b(let|const|var)\s+([\w$]+)\s*:\s*([\w$[\]]+(?:<[\w$]+>)?)\s*=\s*([^\n;]+)/gm,
+        (_, keyword, name, type, expr) => {
+            return `${keyword} ${name} = __typed_default__(${expr.trim()}, "${type}", "${name}")`
         }
     )
     collect(

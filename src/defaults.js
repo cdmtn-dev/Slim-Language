@@ -42,13 +42,8 @@ export function __handle_sync_error__(err) {
 // Console aliases
 function logProcessed(args) {
     return args.map(arg => {
-        if (arg && typeof arg === "object" && arg.type === Enum) {
-            if(typeof arg.value === "object") {
-                return arg.value.name
-            }
-            if("value" in arg) {
-                return arg.value
-            }
+        if(arg instanceof EnumValue) {
+            return arg.value
         }
         return arg
     })
@@ -83,11 +78,23 @@ export class Type {
     static isEnum(obj) {
         return type(obj) == "enum"
     }
+    static isEnumValue(obj) {
+        return obj instanceof EnumValue
+    }
 }
 export class Struct {}
 export class Enum {
     constructor(name) {
         this.name = name;
+    }
+}
+class EnumValue {
+    constructor(value) {
+        this.value = value;
+    }
+
+    [Symbol.toPrimitive]() {
+        return this.value;
     }
 }
 export class Debug {
@@ -128,7 +135,10 @@ export function type(obj) {
     if(typeof obj == "object" && !Array.isArray(obj) && "type" in obj && obj.type == Struct) {
         return "struct"
     }
-    if(typeof obj == "object" && !Array.isArray(obj) && "type" in obj && obj.type == Enum) {
+    if(typeof obj == "object" && !Array.isArray(obj) && "type" in obj && obj.type instanceof Enum) {
+        return "enum"
+    }
+    if(typeof obj == "object" && !Array.isArray(obj) && obj instanceof EnumValue) {
         return "enum"
     }
 
@@ -142,6 +152,9 @@ export function type(obj) {
     if(isArray(obj) && isTypedArray(obj, "float")) return "float[]"
     if(isArray(obj) && isTypedArray(obj, "object")) return "object[]"
     if(isArray(obj) && isTypedOfArray(obj, "number")) return "number[]"
+    if(isArray(obj) && isTypedArray(obj, "enum")) return "enum[]"
+    if(isArray(obj) && isTypedArray(obj, "struct")) return "struct[]"
+    if(isArray(obj) && isTypedArray(obj, "array")) return "array[]"
 
     if(isArray(obj)) return "array"
     if(typeof obj === "object" && !Array.isArray(obj)) return "object"
@@ -264,10 +277,7 @@ export function __def_enum__(name, schema) {
     }
 
     Object.keys(schemeArray).forEach(e => {
-        __enums__[name][e] = {
-            type: Enum,
-            value: schemeArray[e]
-        }
+        __enums__[name][e] = new EnumValue(schemeArray[e])
     })
 
     if (!__RESERVED_DEFINES__.has(name)) {
@@ -275,6 +285,15 @@ export function __def_enum__(name, schema) {
     }
     else {
         throw new EnumError(`Name "${name}" is reserved`)
+    }
+}
+
+export function __typed_default__(value, expectedType, varName) {
+    if(type(value) == expectedType) {
+        return value
+    }
+    else {
+        throw new TypeError(`The variable "${varName}" is of type ${expectedType}, but was assigned a ${type(value)}`)
     }
 }
 
@@ -462,6 +481,7 @@ Object.assign(globalThis, {
 
     __def_struct__, __def_enum__, __typed__, __handle_async_error__, 
     __handle_sync_error__, __sizeof__, __is_empty__, __lock_object__,
+    __typed_default__,
 
     StructError, StructPassedError, StructExpectError, ArgumentDeclarationTypeError,
 
