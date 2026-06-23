@@ -11,13 +11,32 @@ const generate = _generate.default ?? _generate
 
 function resolvePath(raw, fromFile) {
     const fromDir = path.dirname(fromFile)
+    const projectRoot = path.resolve(".")
+    const srcRoot = path.resolve("src")
+    const absFrom = path.resolve(fromFile)
+
+    function getDistFile(slimAbs) {
+        if (slimAbs === path.resolve("struct.slim")) {
+            return path.resolve("dist/output.js")
+        }
+        if (slimAbs.startsWith(srcRoot)) {
+            const rel = path.relative(srcRoot, slimAbs)
+            return path.resolve("dist", rel.replace(/\.slim$/, ".js"))
+        }
+        const rel = path.relative(projectRoot, slimAbs)
+        return path.resolve("dist", rel.replace(/\.slim$/, ".js"))
+    }
+
+    function toRelative(from, to) {
+        const rel = path.relative(path.dirname(from), to).replace(/\\/g, "/")
+        return rel.startsWith(".") ? rel : "./" + rel
+    }
 
     if (raw.startsWith("@slim/")) {
         const rel = raw.replace("@slim/", "")
-        const slimAbs = path.resolve("src/lib", rel + ".slim")
-        const distPath = path.resolve("dist/lib", rel + ".js")
-
-        return "../dist/lib/" + rel + ".js"
+        const distTarget = path.resolve("dist/lib", rel + ".js")
+        const distFrom = getDistFile(absFrom)
+        return toRelative(distFrom, distTarget)
     }
 
     if (raw.endsWith(".js")) {
@@ -25,9 +44,9 @@ function resolvePath(raw, fromFile) {
     }
 
     const slimAbs = path.resolve(fromDir, raw + ".slim")
-    const projectRoot = path.resolve(".")
-    const rel = path.relative(projectRoot, slimAbs)
-    return "../dist/" + rel.replace(/\.slim$/, ".js")
+    const distTarget = getDistFile(slimAbs)
+    const distFrom = getDistFile(absFrom)
+    return toRelative(distFrom, distTarget)
 }
 
 function getDefaultsPath(sourceFile) {

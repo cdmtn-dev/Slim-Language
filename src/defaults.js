@@ -241,7 +241,14 @@ export function __def_enum__(name, schema) {
             return schemeArray
         },
         values: () => {
-            return Object.values(schemeArray)
+            return Object.values(schemeArray).map(item => {
+                if(typeof item === "object" && "name" in item) {
+                    return item.name
+                }
+                else {
+                    return item
+                }
+            })
         },
         keys: () => {
             return Object.keys(schemeArray)
