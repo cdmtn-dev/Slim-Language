@@ -4,9 +4,42 @@ import path from "path"
 import { transform } from "./transform.js"
 
 import { readFile } from 'fs/promises';
-import { Debug } from "./defaults.js";
+import { Debug } from "./external/defaults.js";
+import { stripComments } from "./parser.js";
 
 const compiled = new Set()
+
+function syncExternal() {
+    const srcExternal = path.resolve("src/external")
+    const distExternal = path.resolve("dist/external")
+
+    if (!fs.existsSync(srcExternal)) return
+
+    function syncDir(srcDir, distDir) {
+        fs.mkdirSync(distDir, { recursive: true })
+
+        for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+            const srcFull = path.join(srcDir, entry.name)
+            const distFull = path.join(distDir, entry.name)
+
+            if (entry.isDirectory()) {
+                syncDir(srcFull, distFull)
+                continue
+            }
+
+            if (fs.existsSync(distFull)) {
+                const srcMtime = fs.statSync(srcFull).mtimeMs
+                const distMtime = fs.statSync(distFull).mtimeMs
+                if (srcMtime <= distMtime) continue
+            }
+
+            fs.copyFileSync(srcFull, distFull)
+            Debug.log(`Synced: ${path.relative(".", distFull)}`)
+        }
+    }
+
+    syncDir(srcExternal, distExternal)
+}
 
 function resolveSlimPath(raw, fromFile) {
     if (raw.startsWith("@slim/")) {
@@ -38,6 +71,7 @@ function getDistPath(slimFile) {
 }
 
 function extractUses(code) {
+    code = stripComments(code)
     const uses = []
 
     const patterns = [
@@ -102,6 +136,16 @@ function cleanDist(slimFileClear) {
         path.resolve("dist/mappings.json"),
     ])
 
+    function addDirToKeep(dir) {
+        if (!fs.existsSync(dir)) return
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.resolve(dir, entry.name)
+            keep.add(full)
+            if (entry.isDirectory()) addDirToKeep(full)
+        }
+    }
+    addDirToKeep(path.resolve("dist/external"))
+
     for (const slimFile of compiled) {
         if (slimFile === path.resolve(`${slimFileClear}.slim`)) {
             keep.add(path.resolve(`dist/${slimFileClear}.js`))
@@ -139,6 +183,7 @@ async function main() {
         const data = JSON.parse(contents);
 
         if("main" in data) {
+            syncExternal()
             compileFile(data.main, true, data.main)
             cleanDist(data.main)
         }

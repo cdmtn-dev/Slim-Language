@@ -1,6 +1,6 @@
 import MagicString from "magic-string"
 
-function stripComments(code) {
+export function stripComments(code) {
     let result = ""
     let i = 0
 

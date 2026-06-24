@@ -1,4 +1,4 @@
-import { formatError } from "../classErrors.js"
+import { formatError } from "../external/classErrors.js"
 
 process.on("unhandledRejection", (err, promise) => {
     if (err?.tag) {

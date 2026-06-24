@@ -60,9 +60,10 @@ function getDefaultsPath(sourceFile) {
         distFile = path.resolve("dist", rel.replace(/\.slim$/, ".js"))
     }
 
-    const defaultsAbs = path.resolve("src/defaults.js")
+    const defaultsAbs = path.resolve("dist/external/defaults.js")
     const rel = path.relative(path.dirname(distFile), defaultsAbs)
-    return rel.replace(/\\/g, "/")
+    const relFixed = rel.replace(/\\/g, "/")
+    return relFixed.startsWith(".") ? relFixed : "./" + relFixed
 }
 
 function parseSpecifiers(name) {
