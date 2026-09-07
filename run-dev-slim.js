@@ -107,19 +107,19 @@ async function rebuild() {
 
 await rebuild();
 
-const watcher = chokidar.watch("local", {
+const watchTarget = config.watch ?? ".";
+
+const watcher = chokidar.watch(watchTarget, {
     ignoreInitial: true,
     awaitWriteFinish: {
         stabilityThreshold: 150,
         pollInterval: 50
     },
-    ignored: [
-        "**/node_modules/**",
-        "**/dist/**"
-    ]
+    ignored: p => /(^|[\\/])(node_modules|dist|\.git)([\\/]|$)/.test(p)
 });
 
 watcher.on("all", (_, file) => {
+    if (!file || !file.endsWith(".slim")) return;
     console.log(`Changed: ${file}`);
     rebuild();
 });

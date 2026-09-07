@@ -1,8 +1,5 @@
-export type number(v) {
-    return kindof v == "int" or kindof v == "float"
-}
 export type nonZero(v) {
-    return number(v) && v != 0
+    return (kindof v == "int" or kindof v == "float") && v != 0
 }
 export type even(v) {
     return kindof v == "int" && v % 2 == 0

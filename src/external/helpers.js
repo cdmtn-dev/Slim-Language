@@ -20,7 +20,6 @@ export const idify = (text) => {
         .replace(/^-+|-+$/g, '');
 };
 
-// VDOM
 
 const VOID_ELEMENTS = new Set([
 	"area", "base", "br", "col", "embed", "hr", "img", "input",
@@ -29,10 +28,7 @@ const VOID_ELEMENTS = new Set([
 
 const RAW_TEXT_ELEMENTS = new Set(["script", "style", "textarea", "title"]);
 
-// Component elements are built with the platform DOM when one already exists
-// (a browser, or any environment that provides `document`/`HTMLElement`), and
-// fall back to a single shared linkedom document in Node. Reusing one document
-// is safe because the elements it creates are detached, standalone nodes.
+// Use the platform DOM or detached linkedom nodes; static import supports bundler stubs.
 const hasNativeDom =
 	typeof globalThis.document !== "undefined" &&
 	typeof globalThis.HTMLElement !== "undefined";
@@ -147,7 +143,6 @@ function parseNodes(html) {
 
 	while (i < len) {
 		if (html[i] === "<") {
-			// comment
 			if (html.startsWith("<!--", i)) {
 				const close = html.indexOf("-->", i + 4);
 				const end = close === -1 ? len : close;
@@ -155,13 +150,11 @@ function parseNodes(html) {
 				i = close === -1 ? len : close + 3;
 				continue;
 			}
-			// doctype / declaration
 			if (html[i + 1] === "!" || html[i + 1] === "?") {
 				const close = html.indexOf(">", i);
 				i = close === -1 ? len : close + 1;
 				continue;
 			}
-			// end tag
 			if (html[i + 1] === "/") {
 				const close = html.indexOf(">", i);
 				const end = close === -1 ? len : close;
@@ -176,7 +169,6 @@ function parseNodes(html) {
 				i = close === -1 ? len : close + 1;
 				continue;
 			}
-			// start tag
 			if (isNameStart(html[i + 1])) {
 				let j = i + 1;
 				while (j < len && isNameChar(html[j])) j++;
@@ -233,8 +225,11 @@ export function renderVNode(node) {
 	if (node == null) return "";
 	if (typeof node === "string") return node;
 	if (Array.isArray(node)) return node.map(renderVNode).join("");
+	if (isDomNode(node)) return String(node);
 
 	switch (node.type) {
+		case "node":
+			return String(node.node);
 		case "text":
 			return node.value ?? "";
 		case "comment":
@@ -258,6 +253,8 @@ export function vnodeToElement(node, doc = slimDocument) {
 	if (typeof node.nodeType === "number") return node;
 
 	switch (node.type) {
+		case "node":
+			return node.node;
 		case "text":
 			return doc.createTextNode(node.value ?? "");
 		case "comment":
@@ -265,9 +262,6 @@ export function vnodeToElement(node, doc = slimDocument) {
 		case "fragment": {
 			const frag = doc.createDocumentFragment();
 			for (const child of node.children || []) frag.appendChild(vnodeToElement(child, doc));
-			// A DocumentFragment stringifies to "<#document-fragment>…</…>" by
-			// default; serialize its children directly so it embeds cleanly in a
-			// template (`${fragment}`) and in the server response.
 			frag.toString = fragmentToHtml;
 			return frag;
 		}
@@ -294,42 +288,58 @@ function fragmentToHtml() {
 	return out;
 }
 
-// Coerce a value interpolated into a component template into HTML. Arrays are
-// flattened and joined with no separator (so `${[a, b]}` renders "ab", not
-// "a,b"), null/false render as nothing, and everything else — elements,
-// fragments, VNodes, primitives — stringifies to its HTML.
+// Park live nodes while parsing templates to retain their listeners and methods.
+const NODE_MARKER = "slim-node:";
+let parkedNodes = [];
+
+function isDomNode(value) {
+	return !!value && typeof value === "object" && typeof value.nodeType === "number";
+}
+
 function stringifyChild(value) {
 	if (value == null || value === false) return "";
 	if (Array.isArray(value)) return value.map(stringifyChild).join("");
+	if (isDomNode(value)) return `<!--${NODE_MARKER}${parkedNodes.push(value) - 1}-->`;
 	return String(value);
 }
 
-// --- Client-side event handlers -------------------------------------------
-//
-// A handler written as `onClick=${fn}` in component markup is registered here
-// during the server render, tagged onto its element with a `data-slim-on-*`
-// attribute, and shipped to the browser as a single delegated dispatcher (one
-// document-level listener per event type — the same technique React uses).
-//
-// Handlers run in the browser, so they receive the event and `this` (the
-// element), and may use DOM/browser APIs (document, fetch, console, ...). They
-// cannot close over server-side component scope, since only their source is
-// shipped, not their closure.
-//
-// The registry is module-global and collected once per render. This is safe
-// because a page render is synchronous (no await between registering handlers
-// and flushing them), so concurrent requests never interleave.
+function reviveParked(node) {
+	if (!node || typeof node !== "object" || isDomNode(node)) return node;
+
+	if (node.type === "comment" && typeof node.value === "string" && node.value.startsWith(NODE_MARKER)) {
+		return parkedNodes[Number(node.value.slice(NODE_MARKER.length))] ?? node;
+	}
+
+	if (node.children) node.children = node.children.map(reviveParked);
+	return node;
+}
+
+// Delegated handlers serialize for SSR and retain live closures on the client.
 
 let eventHandlers = [];
 
 function registerEventHandler(event, fn) {
 	const id = eventHandlers.length;
-	eventHandlers.push({ event, source: fn.toString() });
+	eventHandlers.push({ event, source: fn.toString(), fn });
 	return id;
 }
 
-// Return the client script (handler table + delegated dispatcher) for the
-// handlers registered during the current render, then clear the registry.
+const boundEvents = new Set();
+
+// Client dispatch keeps closures and binds once per event type.
+export function __bind_events__() {
+	for (const { event } of eventHandlers) {
+		if (boundEvents.has(event)) continue;
+		boundEvents.add(event);
+		document.addEventListener(event, e => {
+			const el = e.target.closest(`[data-slim-on-${event}]`);
+			if (!el) return;
+			const entry = eventHandlers[el.getAttribute(`data-slim-on-${event}`)];
+			if (entry && entry.fn) entry.fn.call(el, e);
+		});
+	}
+}
+
 export function __flush_events__() {
 	if (eventHandlers.length === 0) return "";
 
@@ -339,9 +349,6 @@ export function __flush_events__() {
 	const table = handlers.map((h, i) => `${i}:${h.source}`).join(",");
 	const events = [...new Set(handlers.map(h => h.event))];
 
-	// Slim's browser runtime (log, type, ...) is emitted ahead of the handler
-	// table so handlers can close over it — they run in the browser, where the
-	// server's defaults.js globals do not exist.
 	const runtime = CLIENT_RUNTIME.map(fn => fn.toString()).join("\n");
 
 	const script =
@@ -357,14 +364,137 @@ export function __flush_events__() {
 		`});` +
 		`})();`;
 
-	// Avoid prematurely closing the injected <script> tag.
 	return script.replace(/<\/script/gi, "<\\/script");
 }
 
-// Tagged template used by compiled components in place of a raw template
-// literal, so interpolated arrays and fragments render as clean HTML and
-// `on<Event>=${fn}` bindings register a delegated event handler.
+// Run lifecycle hooks once; non-browser environments connect eagerly.
+const __lifecycleRecords__ = new Set();
+let __lifecycleObserver__ = null;
+
+function __ensureLifecycleObserver__() {
+	if (__lifecycleObserver__) return true;
+	if (typeof MutationObserver === "undefined" || typeof document === "undefined") return false;
+
+	__lifecycleObserver__ = new MutationObserver(() => {
+		for (const r of [...__lifecycleRecords__]) {
+			const connected = r.el.isConnected;
+			if (connected && !r.connected) {
+				r.connected = true;
+				for (const fn of r.connectFns) fn(r.el);
+				if (!r.unmountFns.length) __lifecycleRecords__.delete(r);
+			} else if (!connected && r.connected) {
+				__lifecycleRecords__.delete(r);
+				for (const fn of r.unmountFns) fn(r.el);
+			}
+		}
+	});
+	__lifecycleObserver__.observe(document.documentElement, { childList: true, subtree: true });
+	return true;
+}
+
+export function __lifecycle__(el, connectFns, unmountFns) {
+	if ((!connectFns || !connectFns.length) && (!unmountFns || !unmountFns.length)) return;
+
+	connectFns = connectFns || [];
+	unmountFns = unmountFns || [];
+
+	const r = { el, connectFns, unmountFns, connected: false };
+
+	if (el.isConnected) {
+		r.connected = true;
+		for (const fn of connectFns) fn(el);
+		if (!unmountFns.length) return;
+	}
+
+	if (!__ensureLifecycleObserver__()) {
+		if (!r.connected) for (const fn of connectFns) fn(el);
+		return;
+	}
+
+	__lifecycleRecords__.add(r);
+}
+
+// Custom elements render into their host and use platform lifecycle callbacks.
+
+export function __create_host__(tag) {
+	const doc = typeof document !== "undefined" ? document : slimDocument;
+	return doc.createElement(tag);
+}
+
+export function __adopt_into__(host, el) {
+	if (el.nodeType === 11) {
+		for (const child of [...el.childNodes]) host.appendChild(child);
+		return;
+	}
+
+	host.appendChild(el);
+}
+
+export function __define_element__(tag, factory) {
+	// linkedom cannot define custom elements.
+	if (typeof customElements === "undefined" || !hasNativeDom) return;
+	if (customElements.get(tag)) return;
+
+	customElements.define(tag, class extends HTMLElement {
+		constructor() {
+			super();
+			this.__slim__ = null;
+			this.__props__ = null;
+
+			// Restore properties assigned before custom-element upgrade.
+			if (Object.prototype.hasOwnProperty.call(this, "props")) {
+				const pending = this.props;
+				delete this.props;
+				this.props = pending;
+			}
+		}
+
+		get props() {
+			return this.__props__ ?? {};
+		}
+
+		set props(value) {
+			this.__props__ = value ?? {};
+			if (this.__slim__) this.__slim_render__();
+		}
+
+		// Convert attributes to component props, including camel-cased data attributes.
+		__slim_props__() {
+			const fromAttributes = {};
+
+			for (const attribute of this.attributes) {
+				fromAttributes[attribute.name] = attribute.value;
+
+				if (!attribute.name.startsWith("data-")) continue;
+				const key = attribute.name
+					.slice("data-".length)
+					.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+				if (key) fromAttributes[key] = attribute.value;
+			}
+
+			return { ...fromAttributes, ...this.__props__ };
+		}
+
+		__slim_render__() {
+			for (const fn of this.__slim__?.unmounts ?? []) fn(this);
+			this.replaceChildren();
+			this.__slim__ = factory(this.__slim_props__(), this);
+		}
+
+		connectedCallback() {
+			if (!this.__slim__) this.__slim_render__();
+			for (const fn of this.__slim__?.connects ?? []) fn(this);
+		}
+
+		disconnectedCallback() {
+			for (const fn of this.__slim__?.unmounts ?? []) fn(this);
+		}
+	});
+}
+
 export function __html__(strings, ...values) {
+	parkedNodes = [];
+
 	let out = strings[0];
 
 	for (let i = 0; i < values.length; i++) {
@@ -372,9 +502,6 @@ export function __html__(strings, ...values) {
 		const eventMatch = out.match(/\son([A-Z][A-Za-z]*)=\s*$/);
 
 		if (eventMatch) {
-			// `on<Event>=${…}` position: drop the raw attribute and bind a
-			// delegated handler only when an actual function was passed, so a
-			// forwarded-but-omitted handler leaves no stray attribute behind.
 			out = out.slice(0, eventMatch.index);
 			if (typeof value === "function") {
 				const event = eventMatch[1].toLowerCase();
@@ -399,11 +526,16 @@ export function htmlToVdom(input) {
 	if (input instanceof VNode) return input;
 
 	const html = input == null ? "" : String(input);
-	const nodes = parseNodes(html);
+	const nodes = parseNodes(html).map(reviveParked);
+	parkedNodes = [];
 
 	const meaningful = nodes.filter(n => !(n.type === "text" && n.value.trim() === ""));
 
-	if (meaningful.length === 1) return meaningful[0];
 	if (meaningful.length === 0) return fragmentNode([]);
+	if (meaningful.length === 1) {
+		const only = meaningful[0];
+		// Wrap revived DOM nodes as VNodes.
+		return isDomNode(only) ? new VNode({ type: "node", node: only }) : only;
+	}
 	return fragmentNode(meaningful);
 }

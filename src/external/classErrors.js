@@ -1,5 +1,9 @@
-import fs from "fs"
-import path from "path"
+// Source frames require a host-provided file reader.
+let readSource = null
+
+export function setSourceReader(reader) {
+    readSource = typeof reader === "function" ? reader : null
+}
 
 let __mappings__ = null
 let __sourceFile__ = null
@@ -7,12 +11,7 @@ let __sourceFile__ = null
 function loadMappings() {
     if (__mappings__) return
     try {
-        const data = JSON.parse(
-            fs.readFileSync(
-                new URL("../../dist/mappings.json", import.meta.url),
-                "utf8"
-            )
-        )
+        const data = JSON.parse(readSource(new URL("../../dist/mappings.json", import.meta.url)))
         __mappings__ = data.mappings
         __sourceFile__ = data.sourceFile
     } catch {
@@ -46,7 +45,7 @@ function isInternalFrame(normalized) {
     )
 }
 
-function parseStack(stack) {
+function parseStack(stack, skip = 0) {
     if (!stack) return null
 
     const frames = []
@@ -64,9 +63,10 @@ function parseStack(stack) {
         frames.push({ file: normalized, line: parseInt(ln), col: parseInt(col) })
     }
 
-    const slimFrame = frames.find(f => f.file.endsWith(".slim"))
-    if (slimFrame || frames.length) {
-        return slimFrame ?? frames[0]
+    if (frames.length) {
+        const slimFrames = frames.filter(f => f.file.endsWith(".slim"))
+        const pool = slimFrames.length ? slimFrames : frames
+        return pool[Math.min(skip, pool.length - 1)]
     }
 
     for (const line of stack.split("\n")) {
@@ -89,12 +89,11 @@ function parseStack(stack) {
 }
 
 function getSourceLine(file, line) {
+    if (!readSource) return null
+
     try {
-        const content = fs.readFileSync(
-            file.replace(/\\/g, "/"),
-            "utf8"
-        )
-        return content.split("\n")[line - 1]?.replace(/\r$/, "") ?? null
+        const content = readSource(file.replace(/\\/g, "/"))
+        return content?.split("\n")[line - 1]?.replace(/\r$/, "") ?? null
     } catch {
         return null
     }
@@ -149,7 +148,7 @@ export class LangError extends Error {
         this.tag = tag
         this.name = tag
 
-        const loc = parseStack(this.stack)
+        const loc = parseStack(this.stack, meta.skipUserFrames ?? 0)
 
         this.file = meta.file ?? loc?.file ?? null
         this.line = meta.line ?? loc?.line ?? null
@@ -187,7 +186,7 @@ export class RuntimeError extends LangError {
 }
 
 export class ArgumentDeclarationTypeError extends TypeError_ {
-    constructor(m, meta) { super(m, "ArgumentDeclarationTypeError", meta) }
+    constructor(m, meta) { super(m, meta) }
 }
 
 export class EnumError extends LangError {

@@ -1,8 +1,4 @@
-// Browser-safe Slim runtime that is made available inside client-side event
-// handlers. The server can't ship the full defaults.js (it depends on Node —
-// fs, process, linkedom), so this is a self-contained subset with no imports:
-// every function stands alone so it can be serialized into the page's handler
-// script and closed over by handlers running in the browser.
+// Browser-safe runtime subset serialized into client handlers.
 
 export function log(...args) { console.log(...args) }
 export function warn(...args) { console.warn(...args) }
@@ -38,8 +34,5 @@ export function type(obj) {
 	return undefined
 }
 
-// The runtime handed to client-side handlers, in serialization order. Each
-// entry is emitted as a standalone function declaration ahead of the handler
-// table, so handlers can call them (and they can call each other, e.g. type's
-// recursion).
+// Client declarations are emitted before the handler table.
 export const CLIENT_RUNTIME = [log, warn, error, info, debug, type]

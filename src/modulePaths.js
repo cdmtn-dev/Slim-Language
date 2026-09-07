@@ -8,6 +8,16 @@ function isWithin(parent, target) {
     return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative)
 }
 
+function bareName(raw) {
+    const segments = raw.split("/")
+    return raw.startsWith("@") ? segments.slice(0, 2).join("/") : segments[0]
+}
+
+function isNodeModule(raw) {
+    if (raw.startsWith(".") || path.isAbsolute(raw)) return false
+    return fs.existsSync(path.resolve("node_modules", bareName(raw)))
+}
+
 export function getDistPath(slimFile) {
     const abs = path.resolve(slimFile)
     const srcRoot = path.resolve("src")
@@ -30,18 +40,27 @@ export function resolveSlimSource(raw, fromFile) {
         const directorySource = path.resolve(packagesRoot, packageName, "main.slim")
         if (fs.existsSync(directorySource)) return directorySource
 
+        if (isNodeModule(raw)) return null
+
         return fileSource
     }
 
     if (raw.endsWith(".js")) return null
 
-    return path.resolve(path.dirname(fromFile), raw + slimExtension)
+    const localSource = path.resolve(path.dirname(fromFile), raw + slimExtension)
+    if (fs.existsSync(localSource)) return localSource
+
+    if (isNodeModule(raw)) return null
+
+    return localSource
 }
 
 export function resolveSlimImport(raw, fromFile) {
     if (raw.endsWith(".js")) return raw
 
     const slimSource = resolveSlimSource(raw, fromFile)
+    if (slimSource === null) return raw
+
     const distTarget = getDistPath(slimSource)
     const distFrom = getDistPath(fromFile)
     const relative = path.relative(path.dirname(distFrom), distTarget).replace(/\\/g, "/")

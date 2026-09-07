@@ -13,6 +13,7 @@ import { deleteGitHubToken, getGitHubToken, saveGitHubToken } from "./api/storag
 import { downloadGitHubRepo, getGitHubUser } from "./api/github_get.js";
 
 import { getPackage, publishPackage, removePackage, updatePackage } from "./api/spm.js"
+import { readLock, setLockEntry, removeLockEntry } from "./api/lock.js"
 import { createGitHubRepo, deleteGitHubRepo, githubHeaders, publishToGitHub, updateGitHubRepo } from "./api/github_req.js";
 
 import open from "open";
@@ -94,6 +95,21 @@ spm
 	});
 
 spm
+    .command("lock")
+	.description("Show resolved package versions from spm.lock.json")
+	.action(() => {
+		const { packages } = readLock()
+		const names = Object.keys(packages)
+
+		if (names.length === 0) {
+			spmlog("No locked packages (spm.lock.json is empty or missing)")
+			return
+		}
+
+		spmlog(`Locked packages:\n${names.map(name => `- @${name}:${packages[name].version} (${packages[name].repo})`).join("\n")}`)
+	});
+
+spm
     .command("get")
     .argument("<name>")
     .action(async (name) => {
@@ -151,7 +167,6 @@ spm
 
 					const githubToken = await getGitHubToken()
 
-					// registry remove
 					const removePackageRegReq = await removePackage({
 						token: githubToken,
 						name: name
@@ -161,7 +176,6 @@ spm
 						return fail("SPM Registry remove:", removePackageRegReq.content)
 					}
 
-					// github remove
 					const removeFromGithubReq = await deleteGitHubRepo(githubToken, githubRepo)
 
 					if (!removeFromGithubReq.success) {
@@ -175,6 +189,7 @@ spm
 				const res = await deleteDirectory(path.join(rootPath, "packages", name))
 
 				if (res) {
+					removeLockEntry(name)
 					return ok(`package @${name} successfully removed locally`)
 				}
 				else {
@@ -212,6 +227,7 @@ spm
 						return fail(downloadRepoReq.msg)
 					}
 					else {
+						setLockEntry(name, { version, repo })
 						return ok(`Package @${name}:${version} installed`)
 					}
 				}
@@ -368,7 +384,6 @@ spm
 									const isPackagesExists = packageInfoReq.success
 
 									if (isPackagesExists) {
-										// updating SPM Registry
 										console.log("\nPackage is already exists... updating")
 
 										const updatePackageReq = await updatePackage({
@@ -383,7 +398,6 @@ spm
 											return fail("Something went wrong while requesting a package update. Please try again later")
 										}
 										else {
-											// updating github repo
 											console.log("\nUpdating package on Github...")
 
 											const updateReq = await updateGitHubRepo({
@@ -403,7 +417,6 @@ spm
 										}
 									}
 									else {
-										// publish package to SPM Registry
 										const publishReq = await publishPackage({
 											token: githubToken,
 											name: name,
