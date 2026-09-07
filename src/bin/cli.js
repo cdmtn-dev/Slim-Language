@@ -7,6 +7,8 @@ import path from "node:path"
 import fs from "node:fs"
 
 import { log, error, parseValue } from "./helpers.js"
+import { runTests } from "../test-runner.js"
+import { formatFile } from "../format.js"
 
 import pkg from "../../package.json" with { type: "json" };
 import defaultConfig from "./config.default.json" with { type: "json" };
@@ -51,8 +53,11 @@ program
     .command("build")
     .description("Build a Slim project")
     .option("-S, --silent", "Build without log")
+    .option("--no-check", "Build without static type checking")
     .action((params) => {
         slimConfigCheck()
+
+        if(!params.check) process.env.SLIM_NO_CHECK = "1"
 
         if(!params.silent) log("Building...")
         execSync("node src/compile.js", { stdio: "inherit" });
@@ -63,9 +68,13 @@ program
     .command("run")
     .description("Build and run a Slim project")
     .option("-S, --silent", "Run without log")
+    .option("-R, --release", "Run without runtime type checks")
+    .option("--no-check", "Run without static type checking")
     .action((params) => {
         slimConfigCheck()
 
+        if(params.release) process.env.SLIM_RELEASE = "1"
+        if(!params.check) process.env.SLIM_NO_CHECK = "1"
         if(!params.silent) log("Building and running...")
         execSync("node src/compile.js && node run-slim.js", { stdio: "inherit" });
     });
@@ -108,9 +117,11 @@ program
     .command("server")
     .description("Compile and run a Slim server")
     .option("-H, --hot", "Run server with hot reload")
+    .option("-R, --release", "Run without runtime type checks")
     .action((hot) => {
         log("Compiling and running server...")
 
+        if(hot["release"]) process.env.SLIM_RELEASE = "1"
         if(hot["hot"]) {
             execSync("node run-dev-slim.js --hot", { stdio: "inherit" });
         }
@@ -260,6 +271,82 @@ program
         if(slimConfigCheck() != false) {
             log("Everything is OK")
         }
+    });
+
+program
+    .command("init")
+    .description("Scaffold a new Slim project")
+    .action(() => {
+        packageCheck()
+
+        if (!fs.existsSync(slimConfigPath)) {
+            fs.writeFileSync(slimConfigPath, JSON.stringify({ main: "index", usePackages: true }, null, 4), "utf8")
+            log("Created slimconfig.json")
+        } else {
+            log("slimconfig.json already exists, leaving it untouched")
+        }
+
+        const entryFile = path.join(root, "index.slim")
+        if (!fs.existsSync(entryFile)) {
+            fs.writeFileSync(entryFile,
+`struct User {
+    name: string
+    id: int
+}
+
+const user: User = { name: "Slim", id: 1 }
+log(\`Hello, \${user.name}!\`)
+`, "utf8")
+            log("Created index.slim")
+        } else {
+            log("index.slim already exists, leaving it untouched")
+        }
+
+        log("Done. Run your project with: slmc run")
+    });
+
+program
+    .command("repl")
+    .description("Start an interactive Slim REPL")
+    .action(async () => {
+        const { startRepl } = await import("../repl.js")
+        startRepl()
+    });
+
+program
+    .command("test")
+    .description("Run Slim test files (*.test.slim)")
+    .argument("[file]", "Run a specific test file")
+    .action((file) => {
+        process.exitCode = runTests(file)
+    });
+
+program
+    .command("fmt")
+    .description("Format Slim source")
+    .argument("[file]", "File to format (defaults to the config main)")
+    .action((file) => {
+        let target = file
+        if (!target) {
+            const config = slimConfigRead()
+            if (!("main" in config)) {
+                error(`No file given and no "main" in slimconfig.json`)
+                process.exitCode = 1
+                return
+            }
+            target = config.main
+        }
+        if (!target.endsWith(".slim")) target += ".slim"
+        target = path.resolve(target)
+
+        if (!fs.existsSync(target)) {
+            error(`File not found: ${target}`)
+            process.exitCode = 1
+            return
+        }
+
+        const changed = formatFile(target)
+        log(changed ? `Formatted ${path.relative(root, target)}` : `${path.relative(root, target)} already formatted`)
     });
 
 

@@ -1,4 +1,5 @@
 import { TypeDefError } from "../external/classErrors.js"
+import { tokenize } from "../lexer.js"
 
 const LEADING_STATEMENT_KEYWORDS = new Set([
     "return", "throw", "yield", "case", "do", "else",
@@ -128,6 +129,7 @@ function extractExprRaw(str, startPos) {
 
     return {
         expr: str.slice(contentStart, i).trim(),
+        start: contentStart,
         end: i
     }
 }
@@ -155,15 +157,107 @@ function replaceOperator(code, keyword, fn) {
     return result
 }
 
-function parseTypedArgs(argsStr) {
+// Read balanced type annotations, including multiline unions.
+function readTypeAnnotation(src, pos) {
+    let i = pos
+
+    const skipSpace = acrossLines => {
+        while (i < src.length && (src[i] === " " || src[i] === "\t" || src[i] === "\r" ||
+            (acrossLines && src[i] === "\n"))) i++
+    }
+
+    const readGroup = (open, close) => {
+        let depth = 0
+        while (i < src.length) {
+            if (src[i] === "\n") return false
+            if (src[i] === open) depth++
+            else if (src[i] === close) {
+                depth--
+                if (depth === 0) { i++; return true }
+            }
+            i++
+        }
+        return false
+    }
+
+    const readAtom = () => {
+        skipSpace(false)
+
+        if (src[i] === "[") {
+            if (!readGroup("[", "]")) return false
+        } else {
+            if (!/[A-Za-z_$]/.test(src[i] ?? "")) return false
+            while (i < src.length && /[\w$]/.test(src[i])) i++
+
+            if (src[i] === ":" && src[i + 1] === ":") {
+                i += 2
+                while (i < src.length && /[\w$]/.test(src[i])) i++
+            }
+            if (src[i] === "<" && !readGroup("<", ">")) return false
+        }
+
+        while (src[i] === "[" && src[i + 1] === "]") i += 2
+        return true
+    }
+
+    if (!readAtom()) return null
+
+    for (;;) {
+        const resume = i
+        skipSpace(true)
+
+        const separator = src[i]
+        if ((separator !== "|" && separator !== "&") || src[i + 1] === separator) {
+            i = resume
+            break
+        }
+
+        i++
+        if (!readAtom()) { i = resume; break }
+    }
+
+    if (src[i] === "?") i++
+
+    const type = src.slice(pos, i).trim().replace(/\s+/g, " ")
+    return type ? { type, end: i } : null
+}
+
+// Split parameters only at top-level commas.
+function splitArguments(argsStr) {
     const args = []
     let depth = 0
     let current = ""
+    const isWord = c => !!c && /[A-Za-z0-9_$]/.test(c)
 
     for (let i = 0; i < argsStr.length; i++) {
         const ch = argsStr[i]
+
+        if (ch === '"' || ch === "'" || ch === "`") {
+            current += ch
+            i++
+            while (i < argsStr.length) {
+                if (argsStr[i] === "\\") {
+                    current += argsStr[i]
+                    i++
+                    if (i < argsStr.length) { current += argsStr[i]; i++ }
+                    continue
+                }
+                current += argsStr[i]
+                if (argsStr[i] === ch) { i++; break }
+                i++
+            }
+            i--
+            continue
+        }
+
         if (ch === "(" || ch === "[" || ch === "{") { depth++; current += ch; continue }
         if (ch === ")" || ch === "]" || ch === "}") { depth--; current += ch; continue }
+        if (ch === "<" && isWord(argsStr[i - 1]) && argsStr[i + 1] !== "=" && argsStr[i + 1] !== "<") {
+            depth++; current += ch; continue
+        }
+        if (ch === ">" && depth > 0 && argsStr[i - 1] !== "=" && argsStr[i + 1] !== "=") {
+            depth--; current += ch; continue
+        }
         if (ch === "," && depth === 0) {
             args.push(current.trim())
             current = ""
@@ -173,18 +267,34 @@ function parseTypedArgs(argsStr) {
     }
     if (current.trim()) args.push(current.trim())
 
-    return args.map(arg => {
-        const match = arg.match(/^([$A-Z_a-z][$\w]*)(\?)?\s*(?::\s*([\w$]+(?:::[\w$]+)?(?:<[^<>]+>)?(?:\[\])?(?:\s*\|\s*[\w$]+(?:::[\w$]+)?(?:<[^<>]+>)?(?:\[\])?)*))?\s*(?:=\s*([\s\S]+))?$/)
-        if (!match) return { raw: arg, name: arg, type: null, optional: false, default: null }
+    return args
+}
 
-        const [, name, optional, type, def] = match
-        return {
-            raw: arg,
-            name,
-            type: type ?? null,
-            optional: !!optional,
-            default: def ?? null
+const ARGUMENT_NAME = /^([$A-Za-z_][$\w]*)(\?)?\s*/
+
+function parseTypedArgs(argsStr) {
+    return splitArguments(argsStr).map(arg => {
+        const untyped = { raw: arg, name: arg, type: null, optional: false, default: null }
+
+        const head = ARGUMENT_NAME.exec(arg)
+        if (!head) return untyped
+
+        let i = head[0].length
+        let type = null
+
+        if (arg[i] === ":") {
+            const annotation = readTypeAnnotation(arg, i + 1)
+            if (!annotation) return untyped
+            type = annotation.type
+            i = annotation.end
         }
+
+        while (i < arg.length && /\s/.test(arg[i])) i++
+
+        if (i < arg.length && arg[i] !== "=") return untyped
+        const def = arg[i] === "=" ? arg.slice(i + 1).trim() : null
+
+        return { raw: arg, name: head[1], type, optional: !!head[2], default: def || null }
     })
 }
 
@@ -220,27 +330,28 @@ function buildTypedArgsResult(parsedArgs, fnName) {
     return { signature, checks }
 }
 
+let __isInsideStringSrc = null
+let __isInsideStringTokens = null
+
 function isInsideString(src, index) {
-    let quote = null;
-
-    for (let i = 0; i < index; i++) {
-        const c = src[i];
-
-        if (c === "\\" && quote) {
-            i++;
-            continue;
-        }
-
-        if (!quote) {
-            if (c === '"' || c === "'" || c === "`") {
-                quote = c;
-            }
-        } else if (c === quote) {
-            quote = null;
-        }
+    if (src !== __isInsideStringSrc) {
+        __isInsideStringSrc = src
+        __isInsideStringTokens = tokenize(src)
     }
 
-    return quote !== null;
+    const tokens = __isInsideStringTokens
+    let lo = 0
+    let hi = tokens.length - 1
+
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1
+        const token = tokens[mid]
+        if (index < token.start) hi = mid - 1
+        else if (index >= token.end) lo = mid + 1
+        else return token.type === "string" || token.type === "template" || token.type === "regex" || token.type === "comment"
+    }
+
+    return false
 }
 
 function extractExprBackward(str, endPosExclusive) {
@@ -396,7 +507,6 @@ function parseTypesEdits(code) {
 
         while (/\s/.test(code[i])) i++;
 
-        // default
         if (code[i] === "=") {
             i++;
 
@@ -424,7 +534,6 @@ function parseTypesEdits(code) {
             continue;
         }
 
-        // func-like
         if (code[i] === "(") {
             const args = readBalanced(code, i, "(", ")");
             i = args.end;
@@ -673,6 +782,7 @@ export {
     replaceBinaryOperator,
     replaceOperator,
     parseTypedArgs,
+    readTypeAnnotation,
     buildTypedArgsResult,
     inferDefaultType,
     isInsideString,

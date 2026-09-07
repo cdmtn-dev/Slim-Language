@@ -335,10 +335,7 @@ export async function createGitHubRepo(token, repository, organization = false) 
             };
         }
 
-        // For a user repo the owner must be the authenticated account. For an
-        // organization repo the owner is the org, so that check is skipped and
-        // the repo is created through the org endpoint (GitHub rejects it if
-        // the account lacks permission).
+        // Organization repositories use the org endpoint; user repositories require ownership.
         if (!organization) {
             const userResponse = await fetch(
                 `${GITHUB_API}/user`,

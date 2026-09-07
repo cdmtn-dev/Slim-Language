@@ -3,9 +3,11 @@ import _traverse from "@babel/traverse"
 import _generate from "@babel/generator"
 import remapping from "@jridgewell/remapping"
 import { preprocess } from "./parser.js"
+import { emitJsDoc, emitDeclarations, jsdocComment } from "./jsdoc.js"
+import { checkTypes, formatDiagnostics } from "./checker.js"
 import * as t from "@babel/types"
 import path from "node:path"
-import { getDistPath, resolveSlimImport } from "./modulePaths.js"
+import { getDistPath, resolveSlimImport, resolveSlimSource } from "./modulePaths.js"
 import {
     PRE_SOURCE,
     buildPreMap,
@@ -20,10 +22,6 @@ function isRuntimeCall(node, name) {
     return t.isCallExpression(node) && t.isIdentifier(node.callee, { name })
 }
 
-function splitTypeUnion(typeText) {
-    return typeText.split("|").map(part => part.trim()).filter(Boolean)
-}
-
 function getTypeReferenceName(typeText) {
     const withoutArray = typeText.replace(/(?:\[\])+$/, "")
     const withoutGeneric = withoutArray.replace(/<.*>$/, "")
@@ -31,7 +29,15 @@ function getTypeReferenceName(typeText) {
 }
 
 function buildTypeSpec(typeText, path_, importedNames = new Set()) {
-    const refs = splitTypeUnion(typeText).map((label) => {
+    typeText = typeText.trim()
+    if (typeText.endsWith("?")) {
+        typeText = typeText.slice(0, -1).trim() + " | null | undefined"
+    }
+
+    const isIntersection = typeText.includes("&") && !typeText.includes("|")
+    const separator = isIntersection ? "&" : "|"
+
+    const refs = typeText.split(separator).map(part => part.trim()).filter(Boolean).map((label) => {
         const referenceName = getTypeReferenceName(label)
         const binding = referenceName ? path_.scope.getBinding(referenceName) : null
         const args = [t.stringLiteral(label)]
@@ -43,7 +49,8 @@ function buildTypeSpec(typeText, path_, importedNames = new Set()) {
         return t.callExpression(t.identifier("__type_ref__"), args)
     })
 
-    return t.callExpression(t.identifier("__type_spec__"), refs)
+    const combinator = isIntersection ? "__type_spec_all__" : "__type_spec__"
+    return t.callExpression(t.identifier(combinator), refs)
 }
 
 function typeLabelFromArgument(node) {
@@ -146,6 +153,31 @@ function instrumentRuntimeTypes(ast, sourceFile, importedNames) {
             ])
         },
 
+        ExpressionStatement(path_) {
+            const call = path_.node.expression
+            if (!isRuntimeCall(call, "__declare_return__")) return
+
+            const [label, owner] = call.arguments
+            const fn = path_.getFunctionParent()
+            if (!t.isStringLiteral(label) || !fn) { path_.remove(); return }
+
+            const specification = buildTypeSpec(label.value, path_, importedNames)
+            const fnName = t.isStringLiteral(owner) ? owner.value : "function"
+
+            fn.traverse({
+                Function(inner) { inner.skip() },
+                ReturnStatement(statement) {
+                    statement.node.argument = t.callExpression(t.identifier("__typed_return__"), [
+                        statement.node.argument ?? t.identifier("undefined"),
+                        t.cloneNode(specification),
+                        t.stringLiteral(fnName)
+                    ])
+                }
+            })
+
+            path_.remove()
+        },
+
         CallExpression(path_) {
             const { node } = path_
 
@@ -240,9 +272,6 @@ function instrumentRuntimeTypes(ast, sourceFile, importedNames) {
         const scopePath = scope.path
 
         if (scopePath.isProgram()) {
-            // Mark module-scope slots so they can be hoisted above the try
-            // wrapper: exported typed declarations stay at the top level, and
-            // their slots must be declared there too — not inside the try.
             declaration._slimTypeSlots = true
             scopePath.unshiftContainer("body", declaration)
         } else if (scopePath.isBlockStatement()) {
@@ -394,12 +423,33 @@ function resolvePath(raw, fromFile) {
     return resolveSlimImport(raw, fromFile)
 }
 
-function getDefaultsPath(sourceFile) {
+function getRuntimePath(sourceFile, entry) {
     const distFile = getDistPath(sourceFile)
-    const defaultsAbs = path.resolve("dist/external/defaults.js")
-    const rel = path.relative(path.dirname(distFile), defaultsAbs)
+    const runtimeAbs = path.resolve(`dist/external/${entry}`)
+    const rel = path.relative(path.dirname(distFile), runtimeAbs)
     const relFixed = rel.replace(/\\/g, "/")
     return relFixed.startsWith(".") ? relFixed : "./" + relFixed
+}
+
+// DOM globals select the full runtime; pure code uses the portable core.
+const DOM_RUNTIME = new Set([
+    "htmlToVdom", "HTMLElement", "__html__",
+    "__flush_events__", "__bind_events__", "__lifecycle__",
+    "__create_host__", "__adopt_into__", "__define_element__"
+])
+
+function usesDom(ast) {
+    let found = false
+
+    traverse(ast, {
+        Identifier(path_) {
+            if (!DOM_RUNTIME.has(path_.node.name)) return
+            found = true
+            path_.stop()
+        }
+    })
+
+    return found
 }
 
 function parseSpecifiers(name) {
@@ -427,8 +477,9 @@ function formatSyntaxError(err, originalCode, sourceFile, mapped) {
     const loc = err.loc
 
     if (!loc) {
-        console.error(`\nSyntaxError: ${err.message}\n`)
-        process.exit(1)
+        const e = new Error(`SyntaxError: ${err.message}`)
+        e.slimSyntaxError = true
+        throw e
     }
 
     const preLineStarts = computeLineStarts(mapped.text)
@@ -442,28 +493,24 @@ function formatSyntaxError(err, originalCode, sourceFile, mapped) {
     const indent = sourceLine.length - sourceLine.trimStart().length
     const pointer = " ".repeat(Math.max(0, column - 1 - indent)) + "^"
 
-    console.error([
-        "",
+    const e = new Error([
         `SyntaxError: ${err.reasonCode ?? "Unexpected token"}`,
         `    at ${sourceFile}:${line}:${column}`,
         "",
         `  ${sourceLine.trim()}`,
         `  ${pointer}`,
-        "",
     ].join("\n"))
-
-    process.exit(1)
+    e.slimSyntaxError = true
+    throw e
 }
 
-export function transform(code, sourceFile = "input.ps") {
+export function transform(code, sourceFile = "input.ps", options = {}) {
     const asyncFunctions = new Set()
     const imports = new Map()
     const wildcards = []
+    const specifierSources = []
 
     const { code: pre, mapped } = preprocess(code, sourceFile)
-
-    // console.log(pre)
-    // process.exit(0)
 
     let ast
     try {
@@ -491,6 +538,7 @@ export function transform(code, sourceFile = "input.ps") {
                 const [sourceNode] = path_.node.arguments
                 if (!t.isStringLiteral(sourceNode)) return
                 wildcards.push(resolvePath(sourceNode.value, sourceFile))
+                specifierSources.push({ spec: null, raw: sourceNode.value })
                 path_.remove()
                 return
             }
@@ -499,6 +547,7 @@ export function transform(code, sourceFile = "input.ps") {
                 const [nameNode, sourceNode] = path_.node.arguments
                 if (!t.isStringLiteral(nameNode) || !t.isStringLiteral(sourceNode)) return
                 imports.set(nameNode.value, resolvePath(sourceNode.value, sourceFile))
+                specifierSources.push({ spec: nameNode.value, raw: sourceNode.value })
                 path_.remove()
             }
         },
@@ -524,16 +573,66 @@ export function transform(code, sourceFile = "input.ps") {
         }
     })
 
+    // Check annotations before lowering or writing output.
+    if (options.check !== false) {
+        const moduleImports = []
+        const moduleWildcards = []
+
+        for (const { spec, raw } of specifierSources) {
+            const slimSource = resolveSlimSource(raw, sourceFile)
+            if (!slimSource) continue
+
+            if (spec === null) {
+                moduleWildcards.push(slimSource)
+                continue
+            }
+
+            for (const specifier of parseSpecifiers(spec)) {
+                if (!t.isImportSpecifier(specifier)) continue
+                moduleImports.push({
+                    local: specifier.local.name,
+                    imported: t.isIdentifier(specifier.imported)
+                        ? specifier.imported.name
+                        : specifier.imported.value,
+                    source: slimSource
+                })
+            }
+        }
+
+        const diagnostics = checkTypes(ast, {
+            mapped,
+            originalCode: code,
+            sourceFile,
+            imports: moduleImports,
+            wildcards: moduleWildcards
+        })
+        if (diagnostics.length > 0) {
+            const error = new Error(formatDiagnostics(diagnostics))
+            error.slimTypeErrors = diagnostics
+            throw error
+        }
+    }
+
     const importedNames = new Set()
     for (const name of imports.keys()) {
         for (const specifier of parseSpecifiers(name)) {
             importedNames.add(specifier.local.name)
         }
     }
+    const declarations = options.declarations ? emitDeclarations(ast) : null
+    const typedefs = options.jsdoc ? emitJsDoc(ast) : []
+
     instrumentRuntimeTypes(ast, sourceFile, importedNames)
 
-    const defaultsPath = getDefaultsPath(sourceFile)
-    const defaultImport = t.importDeclaration([], t.stringLiteral(defaultsPath))
+    const runtimePath = getRuntimePath(sourceFile, usesDom(ast) ? "defaults.js" : "core.js")
+    const defaultImport = t.importDeclaration([], t.stringLiteral(runtimePath))
+
+    if (options.jsdoc) {
+        if (typedefs.length > 0) {
+            t.addComment(defaultImport, "leading", jsdocComment(typedefs), false)
+        }
+        t.addComment(defaultImport, "leading", " @ts-check", true)
+    }
 
     const wildcardNodes = wildcards.flatMap((source) => {
         const alias = "__" + source.replace(/[^a-zA-Z0-9]/g, "_").replace(/^_+|_+$/g, "") + "__"
@@ -634,5 +733,5 @@ export function transform(code, sourceFile = "input.ps") {
     const mapComment = `\n//# sourceMappingURL=data:application/json;base64,${Buffer.from(JSON.stringify(finalMap)).toString("base64")
         }`
 
-    return { code: output + mapComment }
+    return { code: output + mapComment, declarations }
 }

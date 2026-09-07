@@ -16,7 +16,7 @@ function runSlim(name, source) {
     const sourceFile = path.join(root, "__intdiv_tests__", `${name}.slim`)
     const { code } = transform(source, sourceFile)
     const executable = code.replace(
-        /^import\s+[^;]*defaults\.js";$/m,
+        /^import\s+[^;]*(?:defaults|core)\.js";$/m,
         `import ${JSON.stringify(runtimeImport)};`
     )
     const outputFile = path.join(outputDir, `${name}.js`)
@@ -62,4 +62,15 @@ test("unary prefix operators stay inside the left operand", () => {
 
     const awaitCase = preprocess("const x = await a ~/ b", "x.slim").code
     assert.match(awaitCase, /__intdiv__\(await a, b\)/)
+})
+
+test("`~/` inside a template interpolation is lowered, not treated as string", () => {
+    const result = runSlim("template-intdiv", `
+        const a = 20
+        const b = 3
+        log(\`result: \${a ~/ b}\`)
+    `)
+
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /result: 6/)
 })

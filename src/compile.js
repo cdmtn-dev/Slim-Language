@@ -4,7 +4,7 @@ import path from "path"
 import { transform } from "./transform.js"
 
 import { readFile } from 'fs/promises';
-import { Debug } from "./external/defaults.js";
+import { Debug } from "./external/core.js";
 import { stripComments } from "./parser.js";
 import { UseError } from "./external/classErrors.js";
 import { getDistPath, resolveSlimSource } from "./modulePaths.js";
@@ -12,6 +12,9 @@ import { getDistPath, resolveSlimSource } from "./modulePaths.js";
 const compiled = new Set()
 
 let usePackages = true
+let jsdoc = false
+let declarations = false
+let check = true
 
 function syncExternal() {
     const srcExternal = path.resolve("src/external")
@@ -50,14 +53,10 @@ function extractUses(code) {
     const uses = []
 
     const patterns = [
-        // use @scope/pkg
         /\buse\s+(@[\w$\/.-]+)\s*;?$/gm,
-        // use { X } from @scope/pkg
         /\buse\s+(?:\{[^}]+\}|\*\s+as\s+[\w$]+|[\w$]+)\s+from\s+(@[\w$\/.-]+)\s*;?$/gm,
-        // use { X } from "file"
-        /\buse\s+(?:\{[^}]+\}|\*\s+as\s+[\w$]+|[\w$]+)\s+from\s+"([^"]+)"\s*;?$/gm,
-        // use "file"
-        /\buse\s+"([^"]+)"\s*;?$/gm,
+        /\buse\s+(?:\{[^}]+\}|\*\s+as\s+[\w$]+|[\w$]+)\s+from\s+["']([^"']+)["']\s*;?$/gm,
+        /\buse\s+["']([^"']+)["']\s*;?$/gm,
     ]
 
     for (const pattern of patterns) {
@@ -114,17 +113,16 @@ function compileFile(slimFile, isEntry = false, mainEntry = null) {
         compileFile(depPath, false, mainEntry)
     }
 
-    const { code: output } = transform(code, abs)
+    const { code: output, declarations: dts } = transform(code, abs, { jsdoc, declarations, check })
 
-    if (isEntry) {
-        const outputPath = path.resolve(`dist/${mainEntry}.js`)
-        fs.mkdirSync(path.dirname(outputPath), { recursive: true })
-        fs.writeFileSync(outputPath, output)
-    } else {
-        const distPath = getDistPath(abs)
-        fs.mkdirSync(path.dirname(distPath), { recursive: true })
-        fs.writeFileSync(distPath, output)
-    }
+    const outputPath = isEntry
+        ? path.resolve(`dist/${mainEntry}.js`)
+        : getDistPath(abs)
+
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true })
+    fs.writeFileSync(outputPath, output)
+
+    if (dts) fs.writeFileSync(outputPath.replace(/\.js$/, ".d.ts"), dts)
 }
 
 function cleanDist(slimFileClear) {
@@ -151,6 +149,10 @@ function cleanDist(slimFileClear) {
         }
     }
 
+    for (const kept of [...keep]) {
+        if (kept.endsWith(".js")) keep.add(kept.replace(/\.js$/, ".d.ts"))
+    }
+
     function walkAndClean(dir) {
         if (!fs.existsSync(dir)) return
 
@@ -173,21 +175,53 @@ function cleanDist(slimFileClear) {
     walkAndClean(path.resolve("dist"))
 }
 
+function writeJsConfig() {
+    const configPath = path.resolve("jsconfig.json")
+    if (fs.existsSync(configPath)) return
+
+    const config = {
+        compilerOptions: {
+            allowJs: true,
+            checkJs: false,
+            noEmit: true,
+            module: "esnext",
+            target: "es2020",
+            moduleResolution: "bundler",
+            strict: false,
+            skipLibCheck: true
+        },
+        include: ["dist"]
+    }
+
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 4) + "\n")
+    Debug.log("Created jsconfig.json for TypeScript checking")
+}
+
 async function main() {
+    let data
+
     try {
-        const filePath = "slimconfig.json";
-        const contents = await readFile(filePath, 'utf8');
-        const data = JSON.parse(contents);
-
-        usePackages = data.usePackages !== false
-
-        if("main" in data) {
-            syncExternal()
-            compileFile(data.main, true, data.main)
-            cleanDist(data.main)
-        }
+        const contents = await readFile("slimconfig.json", "utf8")
+        data = JSON.parse(contents)
     } catch (error) {
-        console.error('Error reading or parsing slimconfig.json:', error);
+        console.error("Error reading or parsing slimconfig.json:", error)
+        process.exit(1)
+    }
+
+    usePackages = data.usePackages !== false
+    jsdoc = data.jsdoc === true
+    declarations = data.declarations === true
+    check = data.check !== false && process.env.SLIM_NO_CHECK !== "1"
+
+    if (!("main" in data)) return
+
+    try {
+        syncExternal()
+        compileFile(data.main, true, data.main)
+        cleanDist(data.main)
+        if (jsdoc) writeJsConfig()
+    } catch (error) {
+        console.error(`\n${error.slimTypeErrors || error.slimSyntaxError ? error.message : error}\n`)
         process.exit(1)
     }
 }

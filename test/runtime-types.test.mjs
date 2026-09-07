@@ -13,9 +13,9 @@ const runtimeImport = pathToFileURL(path.join(root, "src", "external", "defaults
 function compileSlim(name, source) {
     mkdirSync(outputDir, { recursive: true })
     const sourceFile = path.join(root, "__type_tests__", `${name}.slim`)
-    const { code } = transform(source, sourceFile)
+    const { code } = transform(source, sourceFile, { check: false })
     const executable = code.replace(
-        /^import\s+[^;]*defaults\.js";$/m,
+        /^import\s+[^;]*(?:defaults|core)\.js";$/m,
         `import ${JSON.stringify(runtimeImport)};`
     )
     const outputFile = path.join(outputDir, `${name}.js`)

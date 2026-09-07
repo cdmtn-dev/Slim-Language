@@ -85,7 +85,6 @@ export function parseSPM(content) {
             continue;
         }
 
-        // Sections
         if (trimmed.startsWith("@")) {
 			const section = trimmed.slice(1).trim();
 
@@ -131,7 +130,6 @@ export function parseSPM(content) {
 
         const sectionName = currentSection.join("/");
 
-        // github section control
         if (sectionName === "github") {
             if (!githubSectionAllowed.has(key)) {
                 throw new Error(
@@ -166,7 +164,6 @@ export function parseSPM(content) {
             : value;
     }
 
-    // Required properties
     for (const key of required) {
         if (!result[key]) {
             throw new Error(`missing required property "${key}"`);

@@ -1,15 +1,34 @@
-// simple math add function
 const add = (x: int | float, y: int | float) => {
     return x + y
 }
 
-log(add(2, 2)) // success
-log(add(2, 2)) // TypeError: function "add": argument<0> "x" expected int or float, got string
+log(add(2, 2))   // 4
+log(add(2, 1.5)) // 3.5
 
-// dynamic check for variables
+// Literal violations fail at compile time; runtime values are validated on arrival.
+
+const payload = JSON.parse(`{ "count": "12", "ratio": 1.5 }`)
+
 
 let num: int = 1
-num = 1.5 // Error: The variable "num" is of type int, but it was redefined with type float
+
+try {
+    num = payload.count
+} catch (e) {
+    log(e.message) // The variable "num" is of type int, but it was redefined with type string: "12"
+}
+
+log(num) // 1 — a rejected assignment leaves the binding untouched
+
+
+try {
+    add(payload.count, 2)
+} catch (e) {
+    log(e.message) // function "add": argument<0> "x" expected int or float, got string
+}
+
 
 let superNumber: int | float = 3
-superNumber = 3.5 // success
+superNumber = payload.ratio
+
+log(superNumber) // 1.5

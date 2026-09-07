@@ -2,6 +2,17 @@ type number(v) {
     return kindof v == "int" || kindof v == "float"
 }
 
-let n: number = 1 // ok
+let n: number = 1    // ok
 let n2: number = 1.5 // ok
-let n3: number = "" // expected number, got string
+
+// Custom validators shadow built-ins and are checked only at runtime.
+
+const payload = JSON.parse(`{ "amount": "" }`)
+
+try {
+    let n3: number = payload.amount
+} catch (e) {
+    log(e.message) // The "n3" is of type number, but was assigned a string: ""
+}
+
+log(n + n2) // 2.5
